@@ -514,7 +514,16 @@ class SrelBot(discord.Client):
             to_remove = [r for r in (unverified, guest) if r and r in member.roles]
             if to_remove:
                 await member.remove_roles(*to_remove, reason="verified")
-        except discord.Forbidden:
+        except discord.Forbidden as e:
+            log.warning(
+                "role update failed for %s: %s | bot_top=%s(%d) manage_roles=%s targets=%s",
+                member,
+                e,
+                guild.me.top_role,
+                guild.me.top_role.position,
+                guild.me.guild_permissions.manage_roles,
+                [(r.name, r.position) for r in add],
+            )
             await self._reply(interaction, "Role update failed. Bot role position?", True)
             return
 
