@@ -156,7 +156,16 @@ cp srel-bot.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now srel-bot
 systemctl status srel-bot
+
+# 8. Unattended OS security updates
+apt install -y unattended-upgrades
+dpkg-reconfigure -plow unattended-upgrades   # answer "Yes"
 ```
+
+Step 8 applies Debian/Ubuntu security patches automatically. It does **not**
+update the bot's own code — see [Updating the bot](#updating-the-bot). If a
+patched package needs a reboot, `/var/run/reboot-required` appears; reboot at
+your convenience, the service comes back on its own (`enable --now` above).
 
 Follow logs:
 
@@ -174,6 +183,43 @@ Run each slash command in your server (they only appear to administrators):
 2. `/post-welcome` — posts the persistent buttons into `#welcome`.
 
 Test the flow with a second Discord account. That's it.
+
+---
+
+## Service control
+
+```bash
+systemctl restart srel-bot      # restart (after a code or .env change)
+systemctl stop srel-bot
+systemctl start srel-bot
+systemctl status srel-bot       # is it up, and why did it die
+journalctl -u srel-bot -f       # follow logs
+journalctl -u srel-bot -n 200   # last 200 lines
+reboot                          # whole container; the bot auto-starts
+```
+
+The unit is `Restart=on-failure`, so a crash restarts it after 10s. A clean
+exit (bad config, `SystemExit` on missing env vars) does **not** restart —
+`status` will show the reason.
+
+## Updating the bot
+
+Deliberately manual: pulling and restarting unreviewed code unattended is how
+a bad commit takes the server down at 2am with nobody watching.
+
+```bash
+cd /opt/srel-bot
+git pull                                          # as root: the deploy key is /root/.ssh
+chown -R srelbot:srelbot /opt/srel-bot
+sudo -u srelbot ./venv/bin/pip install -r requirements.txt   # only if it changed
+diff <(grep -o '^[A-Z_]*=' .env.example | sort) <(grep -o '^[A-Z_]*=' .env | sort)
+systemctl restart srel-bot
+journalctl -u srel-bot -n 50
+```
+
+The `diff` line catches the common upgrade break: a release adds a variable to
+`.env.example` and the bot exits on startup because your `.env` lacks it. Add
+any missing keys before restarting.
 
 ---
 
@@ -196,6 +242,7 @@ Optional:
 | Variable | Default | Meaning |
 |---|---|---|
 | `ANNOUNCE_CHANNEL_ID` | *(unset)* | Members channel for the new-member welcome post. Unset or `0` = no announcement. |
+| `RULES_CHANNEL_ID` | *(unset)* | Rules channel linked in the welcome post and agreement prompts. Unset or `0` = generic wording. |
 | `SMTP_HOST` | `smtp.gmail.com` | SMTPS host. |
 | `SMTP_PORT` | `465` | SMTPS port (implicit TLS). |
 | `FROM_NAME` | `SREL Bot` | Display name on outbound email. |
