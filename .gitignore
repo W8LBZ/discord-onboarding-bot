@@ -10,6 +10,7 @@ bot.db-wal
 bot.db-shm
 
 # python
+.cache/
 __pycache__/
 *.py[cod]
 venv/
