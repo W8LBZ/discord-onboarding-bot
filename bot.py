@@ -87,7 +87,7 @@ class Config:
             member_role_id=int(g("MEMBER_ROLE_ID")),
             guest_role_id=int(g("GUEST_ROLE_ID")),
             officer_role_id=int(g("OFFICER_ROLE_ID")),
-            smtp_host=g("SMTP_HOST", "smtp.fastmail.com"),
+            smtp_host=g("SMTP_HOST", "smtp.gmail.com"),
             smtp_port=int(g("SMTP_PORT", "465")),
             smtp_user=g("SMTP_USER"),
             smtp_password=g("SMTP_PASSWORD"),

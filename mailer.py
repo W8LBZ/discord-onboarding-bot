@@ -1,7 +1,7 @@
 """SMTP email sender. Uses stdlib smtplib over implicit TLS (port 465).
 
-Configured for Fastmail (smtp.fastmail.com:465) but works with any SMTP host
-that supports SMTPS + login auth. Use a Fastmail *app password*, not your
+Configured for Gmail (smtp.gmail.com:465) but works with any SMTP host
+that supports SMTPS + login auth. Use a Google *app password*, not your
 account password.
 """
 from __future__ import annotations

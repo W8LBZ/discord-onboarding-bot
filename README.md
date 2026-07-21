@@ -1,5 +1,7 @@
 # SREL Onboarding Bot
 
+Source: https://github.com/W8LBZ/discord-onboarding-bot (private).
+
 Minimal Discord onboarding bot for the club. New members pick one button:
 
 - **I'm a club member** → callsign + email modal → 6-digit code emailed to the address on the roster → enter code → `@member` role granted. If the roster marks the callsign as an officer, the case posts to `#verification-review` for human approval (server owner or existing officers can decide).
@@ -43,7 +45,7 @@ Discord | persistent buttons |          | Google Sheets  |
                   | SMTPS
                   v
         +--------------------+
-        | Fastmail (or any   |
+        | Gmail (or any      |
         |  SMTP host)        |
         +--------------------+
 ```
@@ -83,12 +85,15 @@ All persistent state lives in one SQLite file (`bot.db`). Backup = copy the file
 4. Copy the service account's email address (looks like `srel-bot@project.iam.gserviceaccount.com`), open your sheet, **Share** with that address (Viewer is enough).
 5. Copy the sheet ID from its URL: `https://docs.google.com/spreadsheets/d/`**`<this-part>`**`/edit`.
 
-### 3. Fastmail (email sender)
+### 3. Gmail (email sender)
 
-1. https://app.fastmail.com/settings/security/deviceauth → **New app password**.
-2. Access: **Mail (SMTP)** only — nothing else.
-3. Save the generated password; it is shown once.
-4. Use your normal Fastmail address as `SMTP_USER` and `FROM_EMAIL`.
+The bot sends from a dedicated club Gmail account (see the shared password vault for the address and credentials).
+
+1. On that account, turn on **2-Step Verification** — https://myaccount.google.com/security. App passwords do not exist without it.
+2. https://myaccount.google.com/apppasswords → create one named `srel-bot`. Save the 16-character password; it is shown once.
+3. Use the account address as `SMTP_USER` and `FROM_EMAIL`, and the app password as `SMTP_PASSWORD`.
+
+Gmail caps outbound mail at ~500 messages/day, well above what onboarding needs.
 
 Any other SMTP provider works too — just point `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` at it (SMTPS on port 465 assumed).
 
@@ -122,11 +127,12 @@ mkdir -p /opt/srel-bot
 chown srelbot:srelbot /opt/srel-bot
 chmod 750 /opt/srel-bot
 
-# 3. Drop the project files into /opt/srel-bot
-#    Copy from your workstation, e.g.:
-#      scp bot.py store.py roster.py mailer.py requirements.txt \
-#          .env.example srel-bot.service root@lxc:/opt/srel-bot/
-#    Then, on the container:
+# 3. Clone the repo into /opt/srel-bot
+#    The repo is private: generate a read-only deploy key on the container
+#    (ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519 -N ""), add the public key
+#    under Settings -> Deploy keys on GitHub, then:
+git clone git@github.com:W8LBZ/discord-onboarding-bot.git /tmp/srel-bot
+mv /tmp/srel-bot/* /tmp/srel-bot/.env.example /opt/srel-bot/
 cd /opt/srel-bot
 chown -R srelbot:srelbot .
 
@@ -183,14 +189,14 @@ All settings are environment variables (see `.env.example`). Required:
 | `WELCOME_CHANNEL_ID` | Channel where `/post-welcome` publishes the buttons. |
 | `REVIEW_CHANNEL_ID` | Private channel where officer-grant cases post for approval. |
 | `UNVERIFIED_ROLE_ID` / `MEMBER_ROLE_ID` / `GUEST_ROLE_ID` / `OFFICER_ROLE_ID` | The four role IDs. |
-| `SMTP_USER` / `SMTP_PASSWORD` / `FROM_EMAIL` | Fastmail (or other SMTP) credentials. |
+| `SMTP_USER` / `SMTP_PASSWORD` / `FROM_EMAIL` | Gmail (or other SMTP) credentials. |
 | `GOOGLE_SHEET_ID` | Roster spreadsheet ID. |
 
 Optional:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SMTP_HOST` | `smtp.fastmail.com` | SMTPS host. |
+| `SMTP_HOST` | `smtp.gmail.com` | SMTPS host. |
 | `SMTP_PORT` | `465` | SMTPS port (implicit TLS). |
 | `FROM_NAME` | `SREL Bot` | Display name on outbound email. |
 | `GOOGLE_SA_JSON` | `./service-account.json` | Path to the service account key. |
@@ -234,7 +240,7 @@ The reviewer's user ID is written to `review_queue.resolved_by`. All decisions a
 The bot handles a bot token, an SMTP password, and a Google service-account key. Treat all three as production secrets.
 
 - **File permissions.** `.env` and `service-account.json` must be `chmod 600` and owned by `srelbot`.
-- **Fastmail app password.** Scoped to SMTP only. Rotate on any compromise; it never gives access to your inbox.
+- **Gmail app password.** Scoped to SMTP only, revocable individually at https://myaccount.google.com/apppasswords without touching the account password. Revoke on any compromise.
 - **Google service account.** Read-only scope (`spreadsheets.readonly`), shared with only the roster sheet. Rotate the key by generating a new one and deleting the old in the GCP console.
 - **Discord token.** If leaked, reset it in the developer portal. The bot restarts and picks up the new token.
 - **Unprivileged LXC.** UID mapping already isolates the container from the host. Keep `keyctl` and `nesting` disabled.
@@ -292,7 +298,7 @@ Rules the sync enforces:
 
 **Slash commands don't appear.** Kick and re-invite the bot with the OAuth2 URL from the prerequisites (make sure `applications.commands` scope was included). Commands are guild-scoped and appear within seconds of first `on_ready`.
 
-**Verification email doesn't arrive.** Check `journalctl -u srel-bot`. Common causes: Fastmail app password typo, wrong `FROM_EMAIL` (must be an address you own), or the recipient's provider silently rejecting mail from a new sender. Try a `SMTP_USER = FROM_EMAIL = your-own-address` combination first.
+**Verification email doesn't arrive.** Check `journalctl -u srel-bot`. Common causes: Gmail app password typo (paste all 16 chars), 2-Step Verification turned off on the sending account, wrong `FROM_EMAIL` (Gmail rewrites it to `SMTP_USER` unless it is a verified alias), or the recipient's provider silently rejecting mail from a new sender. `535 Username and Password not accepted` means the app password is wrong or was revoked.
 
 **Google Sheets sync fails.** The sheet must be shared with the service account's email address. Check `/roster-sync` output for the underlying error.
 
