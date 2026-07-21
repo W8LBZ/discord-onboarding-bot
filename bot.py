@@ -47,6 +47,18 @@ WELCOME_LINES = [
     "Please welcome {name} ({call}), henceforth known as {mention}.",
     "{name} ({call}) has joined the net as {mention}. 5 by 9, all copy.",
     "The roster says {name} ({call}). Discord says {mention}. Both correct.",
+    "Band's open: {name} ({call}) joins us as {mention}.",
+    "Roll call — {name} ({call}), on frequency as {mention}.",
+    "{mention} checks in as {name} ({call}). Good copy, welcome in.",
+    "DX alert: {name} ({call}) is in the log, operating as {mention}.",
+    "{name} ({call}) worked us on the first call. Now known as {mention}.",
+    "Log it: {name} ({call}) = {mention}. Confirmed both directions.",
+    "{name} ({call}) cleared the ionosphere and landed here as {mention}.",
+    "Welcome {name} ({call}) — {mention} to the rest of us. 73.",
+    "{name} ({call}) checked in, SWR flat, all nominal. Say hi to {mention}.",
+    "{name} ({call}) is licensed, verified, and answering to {mention}.",
+    "Propagation's good today — {name} ({call}) got through as {mention}.",
+    "Antenna up, coax dry, paperwork done: {name} ({call}) is {mention}.",
 ]
 
 
@@ -327,6 +339,7 @@ class SrelBot(discord.Client):
         self.cfg = cfg
         self.store = Store(cfg.db_path)
         self.tree = app_commands.CommandTree(self)
+        self._last_welcome_line: str | None = None  # in memory only; resets on restart
 
     async def setup_hook(self):
         self.add_view(WelcomeView(self))
@@ -628,9 +641,12 @@ class SrelBot(discord.Client):
             return
         row = self.store.roster_lookup(callsign)
         name = (row["full_name"] if row else "") or member.display_name
-        line = random.choice(WELCOME_LINES).format(
-            name=name, call=callsign, mention=member.mention
-        )
+        # True random repeats often enough to look broken. Never reuse the
+        # previous line; that's the part people actually notice.
+        pool = [t for t in WELCOME_LINES if t != self._last_welcome_line] or WELCOME_LINES
+        template = random.choice(pool)
+        self._last_welcome_line = template
+        line = template.format(name=name, call=callsign, mention=member.mention)
         try:
             await channel.send(
                 line,
