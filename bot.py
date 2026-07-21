@@ -124,6 +124,27 @@ class Config:
 
 # ---------------------------------------------------------------------- views
 
+NICK_MAX = 32  # Discord's limit
+NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "md", "phd"}
+
+
+def club_nick(full_name: str, callsign: str) -> str:
+    """'John Doe' + N0CALL -> 'John D - N0CALL'.
+
+    Suffixes are dropped so "John Doe Jr" doesn't become "John J". A
+    single-word name gets no initial. Falls back to the bare callsign when
+    the roster has no name.
+    """
+    parts = [p for p in full_name.split() if p.strip(".").casefold() not in NAME_SUFFIXES]
+    if not parts:
+        return callsign
+    initial = f" {parts[-1][0].upper()}" if len(parts) > 1 else ""
+    room = NICK_MAX - len(callsign) - len(" - ") - len(initial)
+    if room < 1:
+        return callsign
+    return f"{parts[0][:room]}{initial} - {callsign}"
+
+
 def agreed(value: str) -> bool:
     """Discord modals have no checkbox, so agreement is a typed phrase."""
     return value.strip().strip(".!").casefold() == "i agree"
@@ -569,6 +590,16 @@ class SrelBot(discord.Client):
             await self._reply(interaction, "Role update failed. Bot role position?", True)
             return
 
+        row = self.store.roster_lookup(callsign)
+        nick = club_nick((row["full_name"] if row else ""), callsign)
+        if member.nick != nick:
+            try:
+                await member.edit(nick=nick, reason=f"verified: {callsign}")
+            except discord.Forbidden:
+                # Server owners can never be renamed by a bot; neither can anyone
+                # whose top role outranks ours. Not worth failing the grant over.
+                log.warning("nickname change denied for %s (owner, or role above bot)", member)
+
         if announce:
             await self._announce_welcome(guild, member, callsign)
 
@@ -847,6 +878,49 @@ def register_commands(bot: SrelBot) -> None:
             f"`{callsign}` → <@{row['discord_user_id']}> (claimed {row['claimed_at']}).",
             ephemeral=True,
         )
+
+    @bot.tree.command(
+        name="rename-all",
+        description="Backfill nicknames for already-verified members.",
+    )
+    @app_commands.describe(
+        apply="Leave off for a dry run. Set True to actually rename."
+    )
+    @app_commands.default_permissions(administrator=True)
+    async def rename_all(interaction: discord.Interaction, apply: bool = False):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        planned: list[str] = []
+        skipped: list[str] = []
+        renamed = 0
+        for row in bot.store.all_claims():
+            member = interaction.guild.get_member(row["discord_user_id"])
+            if not member:
+                skipped.append(f"`{row['callsign']}` — left the server")
+                continue
+            nick = club_nick(row["full_name"] or "", row["callsign"])
+            if member.nick == nick:
+                continue
+            planned.append(f"{member.display_name} → **{nick}**")
+            if not apply:
+                continue
+            try:
+                await member.edit(nick=nick, reason="rename-all backfill")
+                renamed += 1
+            except discord.Forbidden:
+                skipped.append(f"`{row['callsign']}` — can't rename (owner or outranks bot)")
+            except discord.HTTPException as e:
+                log.warning("rename failed for %s: %s", member, e)
+                skipped.append(f"`{row['callsign']}` — {e}")
+
+        head = f"Renamed {renamed}." if apply else f"**Dry run** — {len(planned)} would change."
+        body = "\n".join(planned[:20]) or "Nothing to change."
+        if len(planned) > 20:
+            body += f"\n…and {len(planned) - 20} more."
+        if skipped:
+            body += "\n\n**Skipped:**\n" + "\n".join(skipped[:20])
+        if not apply and planned:
+            body += "\n\nRun `/rename-all apply:True` to apply."
+        await interaction.followup.send(f"{head}\n{body}"[:1900], ephemeral=True)
 
     @bot.tree.command(
         name="roster-status",

@@ -140,6 +140,15 @@ class Store:
         with self._conn() as c:
             c.execute("DELETE FROM claimed WHERE callsign = ?", (callsign,))
 
+    def all_claims(self):
+        """Every claim joined to its roster name, for bulk nickname repair."""
+        with self._conn() as c:
+            return c.execute(
+                "SELECT c.callsign, c.discord_user_id, r.full_name "
+                "FROM claimed c LEFT JOIN roster r ON r.callsign = c.callsign "
+                "ORDER BY c.callsign"
+            ).fetchall()
+
     def claimed_count(self) -> int:
         with self._conn() as c:
             return c.execute("SELECT COUNT(*) FROM claimed").fetchone()[0]

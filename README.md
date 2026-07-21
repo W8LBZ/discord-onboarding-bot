@@ -13,7 +13,7 @@ Officer roles and the review queue are built. Full spec lives in [REQUIREMENTS.m
 
 | Gap | Spec |
 |---|---|
-| Rules acceptance (versioned, re-prompt on bump) | §8 |
+| Versioned rules acceptance + re-prompt on bump (a plain "type I AGREE" gate is built) | §8 |
 | Public verification log | §6.6 |
 | `/claim transfer <old> <new>` — vanity call changes | §6.9, §12 |
 | `/verify user <@user>` — manual override path | §6.9 |
@@ -21,7 +21,7 @@ Officer roles and the review queue are built. Full spec lives in [REQUIREMENTS.m
 | Audit log for privileged commands | §6.9, §13 |
 | Funnel reporting | §13.1 |
 
-Built officer commands: `/post-welcome`, `/roster-sync`, `/roster-status`, `/claim-release`, `/claim-who`.
+Built officer commands: `/post-welcome`, `/roster-sync`, `/roster-status`, `/claim-release`, `/claim-who`, `/rename-all`.
 
 **Decisions still open before launch** (§16): who owns the roster, newsletter bounce rate, which channels sit above `@guest`, audit-log retention.
 
@@ -62,7 +62,7 @@ All persistent state lives in one SQLite file (`bot.db`). Backup = copy the file
 3. **Bot** tab → enable **Server Members Intent** (required to detect joins).
 4. **OAuth2 → URL Generator**:
    - Scopes: `bot`, `applications.commands`
-   - Bot permissions: `Manage Roles`, `Send Messages`, `Read Messages/View Channels`, `Use Slash Commands`
+   - Bot permissions: `Manage Roles`, `Manage Nicknames`, `Send Messages`, `Read Messages/View Channels`, `Use Slash Commands`
    - Open the generated URL, invite the bot to your server.
 5. In your server, create these roles (any names; you only need the IDs):
    - `@unverified` — assigned on join
@@ -73,7 +73,7 @@ All persistent state lives in one SQLite file (`bot.db`). Backup = copy the file
    - `#welcome` — public, holds the verification buttons.
    - `#verification-review` — **private**, visible only to `@officer` and the server owner. Officer-grant cases post here for approval.
 7. Enable **User Settings → Advanced → Developer Mode**. Right-click roles / channels / server to copy their IDs.
-8. **Role hierarchy**: drag the bot's own role **above** `@unverified`, `@guest`, `@member`, and `@officer`. It cannot manage roles positioned above its own.
+8. **Role hierarchy**: drag the bot's own role **above** `@unverified`, `@guest`, `@member`, and `@officer`. It cannot manage roles positioned above its own, and it can never rename the server owner.
 
 ### 2. Google Sheet (roster)
 
@@ -265,6 +265,7 @@ All are administrator-only.
 | `/roster-status` | Show roster row count, officer count, claim count, open review cases, last sync time. |
 | `/claim-release <callsign>` | Release a claimed callsign so it can be re-verified. |
 | `/claim-who <callsign>` | Show which Discord user holds a callsign. |
+| `/rename-all [apply]` | Backfill nicknames for already-verified members. Dry run by default; add `apply:True` to rename. |
 
 ## Review queue
 
