@@ -365,7 +365,9 @@ class SrelBot(discord.Client):
         # rejoin: same user re-verifying an already-claimed callsign
         claim = self.store.claim_by_callsign(callsign)
         if claim and claim["discord_user_id"] == interaction.user.id:
-            await self._grant_member(interaction, callsign)
+            # Already announced when the claim was first created. Re-running
+            # this is free (no email, no code), so don't let it spam the channel.
+            await self._grant_member(interaction, callsign, announce=False)
             return
         if claim:
             await interaction.response.send_message(
@@ -482,7 +484,7 @@ class SrelBot(discord.Client):
 
         if not existing:
             self.store.add_claim(callsign, interaction.user.id, email)
-        await self._grant_member(interaction, callsign)
+        await self._grant_member(interaction, callsign, announce=not existing)
 
     async def _grant_member(
         self,
@@ -492,6 +494,7 @@ class SrelBot(discord.Client):
         also_officer: bool = False,
         target_member: discord.Member | None = None,
         notify_target_dm: bool = False,
+        announce: bool = True,
     ):
         """Grant @member (and optionally @officer). If target_member is given,
         role changes apply to that member instead of interaction.user — used
@@ -515,7 +518,8 @@ class SrelBot(discord.Client):
             await self._reply(interaction, "Role update failed. Bot role position?", True)
             return
 
-        await self._announce_welcome(guild, member, callsign)
+        if announce:
+            await self._announce_welcome(guild, member, callsign)
 
         if target_member is None:
             await self._reply(interaction, f"Verified as `{callsign}`. Welcome.", True)
