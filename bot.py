@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 import re
 import secrets
 from dataclasses import dataclass
@@ -33,6 +34,21 @@ log = logging.getLogger("srel")
 CALLSIGN_RE = re.compile(r"^[A-Z0-9]{1,3}\d[A-Z]{1,4}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+# Announcement lines. {name} full name, {call} callsign, {mention} Discord ping.
+# Deliberately pronoun-free — no gender column in the roster, and none needed.
+WELCOME_LINES = [
+    "Hey look, {name} ({call}) graced us with a presence, as {mention}.",
+    "{name} ({call}) has been verified, licensed, and released into the wild as {mention}.",
+    "Signal acquired: {name} ({call}) is now {mention}. Copy that.",
+    "{name} ({call}) finally read the manual and got in. Say hi to {mention}.",
+    "New contact logged — {name} ({call}), operating as {mention}. QSL.",
+    "{mention} is really {name} ({call}). The disguise fooled no one.",
+    "{name} ({call}) emerged from the ether. Now answers to {mention}.",
+    "Please welcome {name} ({call}), henceforth known as {mention}.",
+    "{name} ({call}) has joined the net as {mention}. 5 by 9, all copy.",
+    "The roster says {name} ({call}). Discord says {mention}. Both correct.",
+]
+
 
 # --------------------------------------------------------------------- config
 
@@ -42,6 +58,7 @@ class Config:
     guild_id: int
     welcome_channel_id: int
     review_channel_id: int
+    announce_channel_id: int  # 0 disables the welcome announcement
     unverified_role_id: int
     member_role_id: int
     guest_role_id: int
@@ -83,6 +100,7 @@ class Config:
             guild_id=int(g("GUILD_ID")),
             welcome_channel_id=int(g("WELCOME_CHANNEL_ID")),
             review_channel_id=int(g("REVIEW_CHANNEL_ID")),
+            announce_channel_id=int(g("ANNOUNCE_CHANNEL_ID", "0")),
             unverified_role_id=int(g("UNVERIFIED_ROLE_ID")),
             member_role_id=int(g("MEMBER_ROLE_ID")),
             guest_role_id=int(g("GUEST_ROLE_ID")),
@@ -497,6 +515,8 @@ class SrelBot(discord.Client):
             await self._reply(interaction, "Role update failed. Bot role position?", True)
             return
 
+        await self._announce_welcome(guild, member, callsign)
+
         if target_member is None:
             await self._reply(interaction, f"Verified as `{callsign}`. Welcome.", True)
             return
@@ -509,6 +529,33 @@ class SrelBot(discord.Client):
                 )
             except discord.Forbidden:
                 pass  # DMs closed. Nothing we can do.
+
+    async def _announce_welcome(
+        self, guild: discord.Guild, member: discord.Member, callsign: str
+    ):
+        """Post a random welcome line to the members channel. Never fatal."""
+        if not self.cfg.announce_channel_id:
+            return
+        channel = guild.get_channel(self.cfg.announce_channel_id)
+        if not channel:
+            log.warning("announce channel %s not found", self.cfg.announce_channel_id)
+            return
+        row = self.store.roster_lookup(callsign)
+        name = (row["full_name"] if row else "") or member.display_name
+        line = random.choice(WELCOME_LINES).format(
+            name=name, call=callsign, mention=member.mention
+        )
+        try:
+            await channel.send(
+                line,
+                allowed_mentions=discord.AllowedMentions(
+                    users=[member], roles=False, everyone=False
+                ),
+            )
+        except discord.HTTPException as e:
+            # Never let a failed announcement abort the verification reply —
+            # roles are already granted at this point.
+            log.warning("welcome post to %s failed: %s", self.cfg.announce_channel_id, e)
 
     async def _post_review(
         self,

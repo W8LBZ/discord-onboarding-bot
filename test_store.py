@@ -86,6 +86,28 @@ def test_roster():
     assert s.roster_lookup("KD8AAA") is None, "dropped member still on roster"
 
 
+def test_welcome_lines_render():
+    # Read the literal out of bot.py rather than importing it — bot.py pulls in
+    # discord.py, which this test doesn't need.
+    import ast
+    import pathlib
+
+    tree = ast.parse(pathlib.Path(__file__).with_name("bot.py").read_text())
+    lines = [
+        ast.literal_eval(n.value)
+        for n in tree.body
+        if isinstance(n, ast.Assign)
+        and getattr(n.targets[0], "id", None) == "WELCOME_LINES"
+    ]
+    assert lines, "WELCOME_LINES not found in bot.py"
+
+    for t in lines[0]:
+        out = t.format(name="James Flattery", call="KO4CFG", mention="<@1>")
+        assert "{" not in out, f"unsubstituted placeholder in: {t}"
+        for word in (" he ", " she ", " his ", " her ", " him "):
+            assert word not in f" {out.lower()} ", f"gendered pronoun in: {t}"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

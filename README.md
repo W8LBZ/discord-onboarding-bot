@@ -14,8 +14,7 @@ Officer roles and the review queue are built. Full spec lives in [REQUIREMENTS.m
 | Gap | Spec |
 |---|---|
 | Rules acceptance (versioned, re-prompt on bump) | §8 |
-| Nickname formatting (`Jim F - W1ABC`) | §7 |
-| Public verification log / welcome feed | §6.6 |
+| Public verification log | §6.6 |
 | `/claim transfer <old> <new>` — vanity call changes | §6.9, §12 |
 | `/verify user <@user>` — manual override path | §6.9 |
 | `/rules bump <version>` | §6.9, §8 |
@@ -63,7 +62,7 @@ All persistent state lives in one SQLite file (`bot.db`). Backup = copy the file
 3. **Bot** tab → enable **Server Members Intent** (required to detect joins).
 4. **OAuth2 → URL Generator**:
    - Scopes: `bot`, `applications.commands`
-   - Bot permissions: `Manage Roles`, `Manage Nicknames`, `Send Messages`, `Read Messages/View Channels`, `Use Slash Commands`
+   - Bot permissions: `Manage Roles`, `Send Messages`, `Read Messages/View Channels`, `Use Slash Commands`
    - Open the generated URL, invite the bot to your server.
 5. In your server, create these roles (any names; you only need the IDs):
    - `@unverified` — assigned on join
@@ -196,6 +195,7 @@ Optional:
 
 | Variable | Default | Meaning |
 |---|---|---|
+| `ANNOUNCE_CHANNEL_ID` | *(unset)* | Members channel for the new-member welcome post. Unset or `0` = no announcement. |
 | `SMTP_HOST` | `smtp.gmail.com` | SMTPS host. |
 | `SMTP_PORT` | `465` | SMTPS port (implicit TLS). |
 | `FROM_NAME` | `SREL Bot` | Display name on outbound email. |
@@ -311,8 +311,7 @@ Rules the sync enforces:
 This MVP intentionally skips several requirements from `callsign-onboarding-bot-requirements-v2.md`. Each is straightforward to bolt on:
 
 - **Rules acceptance** — add a second view between callsign entry and email send.
-- **Nickname formatting (`Jim F - CALLSIGN`)** — add a first-name field to `MemberModal`; call `member.edit(nick=…)` in `_grant_member`.
-- **Public verification log** — one `channel.send()` after a successful `_grant_member`.
+- **Public verification log** — the welcome announcement covers the social half; a machine-readable audit log is still unbuilt.
 - **Nightly CSV export** — `sqlite3 bot.db ".mode csv" ".output roster.csv" "SELECT * FROM roster;"` in the existing cron.
 - **Review-queue staleness alerts** — background task that re-pings `#verification-review` when a case has been open >48h.
 - **Roster-miss handling** — currently rejected at submit. Doc §9 suggests queuing these too (a visiting ham from another club).
