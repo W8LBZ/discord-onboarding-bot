@@ -59,6 +59,7 @@ class Config:
     welcome_channel_id: int
     review_channel_id: int
     announce_channel_id: int  # 0 disables the welcome announcement
+    rules_channel_id: int  # 0 omits the rules link from prompts
     unverified_role_id: int
     member_role_id: int
     guest_role_id: int
@@ -101,6 +102,7 @@ class Config:
             welcome_channel_id=int(g("WELCOME_CHANNEL_ID")),
             review_channel_id=int(g("REVIEW_CHANNEL_ID")),
             announce_channel_id=int(g("ANNOUNCE_CHANNEL_ID", "0")),
+            rules_channel_id=int(g("RULES_CHANNEL_ID", "0")),
             unverified_role_id=int(g("UNVERIFIED_ROLE_ID")),
             member_role_id=int(g("MEMBER_ROLE_ID")),
             guest_role_id=int(g("GUEST_ROLE_ID")),
@@ -122,6 +124,16 @@ class Config:
 
 # ---------------------------------------------------------------------- views
 
+def agreed(value: str) -> bool:
+    """Discord modals have no checkbox, so agreement is a typed phrase."""
+    return value.strip().strip(".!").casefold() == "i agree"
+
+
+def rules_hint(cfg: "Config") -> str:
+    where = f"<#{cfg.rules_channel_id}>" if cfg.rules_channel_id else "the rules channel"
+    return f"You must read {where} and type **I AGREE** to continue."
+
+
 class WelcomeView(discord.ui.View):
     def __init__(self, bot: "SrelBot"):
         super().__init__(timeout=None)
@@ -141,6 +153,25 @@ class WelcomeView(discord.ui.View):
         custom_id="srel:guest",
     )
     async def guest_btn(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.send_modal(GuestModal(self.bot))
+
+
+class GuestModal(discord.ui.Modal, title="Guest access"):
+    agree_field = discord.ui.TextInput(
+        label="Type I AGREE to accept the server rules",
+        placeholder="I AGREE",
+        max_length=16,
+        required=True,
+    )
+
+    def __init__(self, bot: "SrelBot"):
+        super().__init__()
+        self.bot = bot
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not agreed(str(self.agree_field.value)):
+            await interaction.response.send_message(rules_hint(self.bot.cfg), ephemeral=True)
+            return
         await self.bot.grant_guest(interaction)
 
 
@@ -157,12 +188,21 @@ class MemberModal(discord.ui.Modal, title="Club member verification"):
         max_length=254,
         required=True,
     )
+    agree_field = discord.ui.TextInput(
+        label="Type I AGREE to accept the server rules",
+        placeholder="I AGREE",
+        max_length=16,
+        required=True,
+    )
 
     def __init__(self, bot: "SrelBot"):
         super().__init__()
         self.bot = bot
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not agreed(str(self.agree_field.value)):
+            await interaction.response.send_message(rules_hint(self.bot.cfg), ephemeral=True)
+            return
         await self.bot.handle_member_submit(
             interaction,
             str(self.callsign_field.value),
@@ -440,7 +480,9 @@ class SrelBot(discord.Client):
             return
         await interaction.followup.send(
             f"Sent a 6-digit code to the email on file for `{callsign}`. "
-            f"It expires in {self.cfg.code_ttl_min} minutes.",
+            f"It expires in {self.cfg.code_ttl_min} minutes.\n"
+            f"**Not there in a minute? Check your spam or junk folder** — "
+            f"and mark it as not spam so club mail reaches you.",
             view=EnterCodeView(self),
             ephemeral=True,
         )
@@ -739,10 +781,15 @@ def register_commands(bot: SrelBot) -> None:
                 "Welcome channel not found.", ephemeral=True
             )
             return
+        rules = (
+            f"<#{bot.cfg.rules_channel_id}>" if bot.cfg.rules_channel_id else "the rules channel"
+        )
         await channel.send(
             "**Welcome to SREL.**\n"
-            "Click below to get started.\n\n"
-            "• **Club member?** We'll verify by emailing a short code to the address on file.\n"
+            f"Read {rules} first, then click below to get started. Either button asks "
+            "you to type **I AGREE** to confirm you've read them.\n\n"
+            "• **Club member?** We'll verify by emailing a short code to the address on file. "
+            "Check your spam folder if it doesn't arrive.\n"
             "• **Just visiting?** No callsign needed — say hello.",
             view=WelcomeView(bot),
         )
