@@ -1,0 +1,44 @@
+[Unit]
+Description=SREL Discord onboarding bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=srelbot
+Group=srelbot
+WorkingDirectory=/opt/srel-bot
+EnvironmentFile=/opt/srel-bot/.env
+ExecStart=/opt/srel-bot/venv/bin/python /opt/srel-bot/bot.py
+Restart=on-failure
+RestartSec=10s
+
+# --- sandboxing ---
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/srel-bot
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

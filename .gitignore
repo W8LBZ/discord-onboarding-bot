@@ -1,0 +1,21 @@
+# secrets — never commit
+.env
+service-account.json
+*.json.key
+
+# runtime state
+bot.db
+bot.db-journal
+bot.db-wal
+bot.db-shm
+
+# python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# editors / os
+.vscode/
+.idea/
+.DS_Store
