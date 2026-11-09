@@ -153,9 +153,14 @@ systemctl daemon-reload
 systemctl enable --now srel-bot
 systemctl status srel-bot
 
-# 8. Unattended OS security updates
-apt install -y unattended-upgrades
+# 8. Unattended OS security updates, and restarts afterwards
+apt install -y unattended-upgrades needrestart
 dpkg-reconfigure -plow unattended-upgrades   # answer "Yes"
+# needrestart: restart services still running an updated library (Debian's default only lists them when
+# nobody's there to answer). A container uses the Proxmox host's kernel, so no kernel hints.
+echo "\$nrconf{restart} = 'a';" > /etc/needrestart/conf.d/50-auto.conf
+echo "\$nrconf{kernelhints} = 0;" >> /etc/needrestart/conf.d/50-auto.conf
+needrestart -r a
 ```
 
 Step 8 applies Debian/Ubuntu security patches automatically. It does **not**
