@@ -102,7 +102,7 @@ def test_welcome_lines_render():
     assert lines, "WELCOME_LINES not found in bot.py"
 
     for t in lines[0]:
-        out = t.format(name="James Flattery", call="KO4CFG", mention="<@1>")
+        out = t.format(name="James Flattery", call="KO4CGQ", mention="<@1>")
         assert "{" not in out, f"unsubstituted placeholder in: {t}"
         for word in (" he ", " she ", " his ", " her ", " him "):
             assert word not in f" {out.lower()} ", f"gendered pronoun in: {t}"

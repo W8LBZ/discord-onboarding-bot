@@ -89,7 +89,7 @@ Where G0 and G3 genuinely conflict, **G3 yields for guests and wins for officers
 | `audit_log` | Append-only event records | Who verified, when, roles granted, collisions flagged, approvals, overrides, roster syncs, releases |
 | `lookup_cache` | `callsign → {response, fetched_at}` | TTL per §13 |
 
-**Normalization:** all callsigns uppercase and whitespace-stripped on both roster load and user input, so `ke4car` and `KE4CAR` match. Apply at the storage boundary so it can't be forgotten at a call site.
+**Normalization:** all callsigns uppercase and whitespace-stripped on both roster load and user input, so `ko4cgq` and `KO4CGQ` match. Apply at the storage boundary so it can't be forgotten at a call site.
 
 **Backend:** SQLite. Single file, trivially backed up, no server to maintain. Non-negotiable that it persists across restarts — the dedup guard is worthless if it resets.
 
@@ -155,7 +155,7 @@ And the counterfactual for G1 is not "zero work." It's a moderator manually chec
 
 ### 6.2 The first-come problem, and what actually closes it
 
-**Roster matching on callsign alone is first-come-first-served, and callsigns are public.** They're on QRZ, on the club roster, and spoken aloud on the air. The `claimed` ledger only stops the *second* person to claim a callsign. If an impersonator claims KE4CAR before the real Jim does, the impersonator gets the role — and Jim later gets the collision warning and looks like the liar.
+**Roster matching on callsign alone is first-come-first-served, and callsigns are public.** They're on QRZ, on the club roster, and spoken aloud on the air. The `claimed` ledger only stops the *second* person to claim a callsign. If an impersonator claims KO4CGQ before the real Jim does, the impersonator gets the role — and Jim later gets the collision warning and looks like the liar.
 
 **Bounding the problem.** The attack needs a callsign that is (a) on the roster, (b) unclaimed, and (c) held by someone not yet in the Discord. That set is large exactly once — at launch — and monotonically shrinks. It is also **self-detecting**: when the real Jim verifies, he collides, and the case surfaces. So this is primarily a *rollout* problem (§15) and only secondarily a steady-state one.
 
@@ -214,7 +214,7 @@ Shared household addresses (two hams, one inbox) are fine — both are members, 
 
 ### 6.6 Public verification log (recommended, free)
 
-A public `#verification-log` or `#new-members` channel where the bot posts each successful verification: *"Welcome KE4CAR — Jim F!"* and, louder, each guest→member upgrade: *"Jim just got licensed — welcome to the airwaves, KE4CAR!"*
+A public `#verification-log` or `#new-members` channel where the bot posts each successful verification: *"Welcome KO4CGQ — Jim F!"* and, louder, each guest→member upgrade: *"Jim just got licensed — welcome to the airwaves, KO4CGQ!"*
 
 Two jobs at once:
 - **Growth (G0a):** new-licensee announcements are the club's best recurring engagement moment, and they make the funnel visible to everyone. A prospect lurking in `#general` sees people like them crossing the line regularly. That's worth more than any recruiting post.
@@ -273,7 +273,7 @@ Leaving guests alone makes the nickname format **a signal**, readable at a glanc
 
 | Nickname shape | Means |
 |---|---|
-| `Jim F - KE4CAR` | Verified club member |
+| `Jim F - KO4CGQ` | Verified club member |
 | Anything else | Guest |
 
 This doesn't compromise G2 — it sharpens it. It also satisfies §2.1 (guests get zero friction) and removes a small act of ownership over someone who hasn't joined anything yet.
@@ -285,15 +285,15 @@ This doesn't compromise G2 — it sharpens it. It also satisfies §2.1 (guests g
 - **The sanitization problem shrinks to near-nothing.** See §7.3.
 - The rename becomes a *moment*: it happens exactly once, when a guest earns a callsign (§9). That's a promotion, not a processing step — announce it (§6.6).
 
-The bot still **collects** a preferred first name from guests, purely so it can greet them by it and so officers know who's who. It just never writes it to their nickname. Warn a converting guest before the rename — *"your nickname will become Jim F - KE4CAR"* — so it isn't a surprise.
+The bot still **collects** a preferred first name from guests, purely so it can greet them by it and so officers know who's who. It just never writes it to their nickname. Warn a converting guest before the rename — *"your nickname will become Jim F - KO4CGQ"* — so it isn't a surprise.
 
 ### 7.1 Target format (callsign holders only)
 
-`Jim F - KE4CAR`
+`Jim F - KO4CGQ`
 
 - `Jim` — user's preferred first name (self-reported)
 - `F` — first initial of last name
-- `KE4CAR` — validated callsign
+- `KO4CGQ` — validated callsign
 
 **Last-name source:** ask in the modal, but pre-fill/suggest from the Tier 2 lookup when available (US). Display only the initial, so full legal names are never published. Works for foreign hams, avoids parsing FCC legal names into display form, keeps the privacy optics clean.
 
@@ -301,8 +301,8 @@ The bot still **collects** a preferred first name from guests, purely so it can 
 
 | Case | Result |
 |---|---|
-| First + last + callsign | `Jim F - KE4CAR` |
-| First + callsign, no last name and no lookup | `Jim - KE4CAR` |
+| First + last + callsign | `Jim F - KO4CGQ` |
+| First + callsign, no last name and no lookup | `Jim - KO4CGQ` |
 | **No callsign (guest)** | **Nickname untouched. Bot takes no action.** |
 | Over Discord's 32-char cap | Truncate the **first name** first, then drop the last initial; never truncate the callsign — it's the identity anchor |
 | Re-running verification | **Overwrite** cleanly. Never append |
@@ -452,7 +452,7 @@ Not hypothetical. <cite index="13-1">ULS is scheduled down for maintenance from 
 
 Things that are obvious to a ham and invisible to a general-purpose bot design:
 
-- **Vanity callsign changes.** Members change callsigns — KE4CAR upgrades and becomes W4XYZ. The roster is keyed by callsign, so this looks exactly like a `roster_miss` for a stranger. `/claim transfer <old> <new>` handles it; the audit log preserves both. Expect this a few times a year.
+- **Vanity callsign changes.** Members change callsigns — KD8AAA upgrades and becomes W8AMY. The roster is keyed by callsign, so this looks exactly like a `roster_miss` for a stranger. `/claim transfer <old> <new>` handles it; the audit log preserves both. Expect this a few times a year.
 - **Club station callsigns.** If the club holds a station call under a trustee, it is not a person. Exclude it from the roster sync or it becomes claimable.
 - **Expired licenses.** FCC data includes expiry. A member whose ticket lapsed is still a club member and probably a friend of 20 years. Recommendation: `lookup_miss` → queue, never auto-strip. Do not build license policing into an onboarding bot.
 - **Multiple callsigns.** Some hams hold more than one. The `claimed` ledger is `callsign → user`, which permits it; the nickname shows one. Pick the roster-matching call for display.
