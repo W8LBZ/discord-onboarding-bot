@@ -102,10 +102,67 @@ def test_welcome_lines_render():
     assert lines, "WELCOME_LINES not found in bot.py"
 
     for t in lines[0]:
-        out = t.format(name="James Flattery", call="KO4CFG", mention="<@1>")
+        out = t.format(name="James Flattery", call="KO4CGQ", mention="<@1>")
         assert "{" not in out, f"unsubstituted placeholder in: {t}"
         for word in (" he ", " she ", " his ", " her ", " him "):
             assert word not in f" {out.lower()} ", f"gendered pronoun in: {t}"
+
+
+def test_code_attempts():
+    s = fresh()
+    s.create_code(1, "KD8AAA", "a@ex.com", "123456", ttl_min=15)
+    for _ in range(4):
+        assert s.consume_code(1, "000000") is None
+    assert s.consume_code(1, "123456") == ("KD8AAA", "a@ex.com"), "right code refused after 4 wrong tries"
+    s.create_code(1, "KD8AAA", "a@ex.com", "654321", ttl_min=15)
+    for _ in range(5):
+        s.consume_code(1, "000000")
+    assert s.consume_code(1, "654321") is None, "code still usable after 5 wrong tries"
+
+
+def test_settings():
+    s = fresh()
+    assert s.get_setting("welcome_message_id") is None
+    s.set_setting("welcome_message_id", 1234567890123)
+    s.set_setting("welcome_message_id", 987)
+    assert s.get_setting("welcome_message_id") == 987
+
+
+def test_parse_roster():
+    from roster import parse_roster
+    rows = parse_roster([{"callsign": "kd8aaa", "name": "Amy Able", "email": "Amy@Example.org", "officer": True},
+                         {"callsign": None, "name": "No Call", "email": "x@example.org", "officer": False},
+                         {"callsign": "KD8AAA", "name": "Dup", "email": "d@example.org", "officer": False},
+                         {"callsign": "KD8BBB", "name": "Bob", "email": "", "officer": "true"}])
+    assert rows == [("KD8AAA", "Amy Able", "amy@example.org", True)], rows
+
+
+def test_transfer_claim():
+    s = fresh()
+    s.add_claim("KD8AAA", 1, "a@ex.com")
+    assert s.transfer_claim("KD8AAA", "W8AMY") == "moved"
+    assert s.claim_by_callsign("W8AMY")["discord_user_id"] == 1 and s.claim_by_callsign("KD8AAA") is None
+    assert s.transfer_claim("KD8AAA", "W8AMY") == "none"  # the next sync: nothing left to move
+    s.add_claim("KD8BBB", 2, "b@ex.com")
+    s.add_claim("W8BOB", 3, "c@ex.com")
+    assert s.transfer_claim("KD8BBB", "W8BOB") == "conflict" and s.claim_by_callsign("KD8BBB")["discord_user_id"] == 2
+    s.add_claim("KD8CCC", 4, "d@ex.com")
+    s.add_claim("W8CAL", 4, "d2@ex.com")  # re-verified with the new call already
+    assert s.transfer_claim("KD8CCC", "W8CAL") == "same user" and s.claim_by_callsign("KD8CCC") is None
+
+
+def test_callsign_changes():
+    from roster import callsign_changes
+    assert callsign_changes([{"callsign": "w8amy", "former": ["kd8aaa", "W8AMY"]}, {"callsign": "KD8BBB"}]) == {"KD8AAA": "W8AMY"}
+
+
+def test_callsign_lines_render():
+    import ast
+    tree = ast.parse(open("bot.py").read())
+    lines = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign) and n.targets[0].id == "CALLSIGN_LINES")
+    for t in lines:
+        out = t.format(name="Amy Able", old="KD8AAA", new="W8AMY", mention="<@1>")
+        assert "W8AMY" in out and "KD8AAA" in out and "<@1>" in out, t
 
 
 if __name__ == "__main__":
