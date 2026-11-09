@@ -156,6 +156,15 @@ def test_callsign_changes():
     assert callsign_changes([{"callsign": "w8amy", "former": ["kd8aaa", "W8AMY"]}, {"callsign": "KD8BBB"}]) == {"KD8AAA": "W8AMY"}
 
 
+def test_callsign_lines_render():
+    import ast
+    tree = ast.parse(open("bot.py").read())
+    lines = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign) and n.targets[0].id == "CALLSIGN_LINES")
+    for t in lines:
+        out = t.format(name="Amy Able", old="KD8AAA", new="W8AMY", mention="<@1>")
+        assert "W8AMY" in out and "KD8AAA" in out and "<@1>" in out, t
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

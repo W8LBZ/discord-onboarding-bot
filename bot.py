@@ -62,6 +62,16 @@ WELCOME_LINES = [
 ]
 
 
+# New-callsign announcements: {name}, {old} and {new} calls, {mention}. Pronoun-free, like the welcome lines.
+CALLSIGN_LINES = [
+    "New call alert: {name} is now {new} (was {old}). Congratulations, {mention}!",
+    "{old} has left the building. Please welcome {new}, still {mention}, still {name}.",
+    "Update your logbooks: {name} ({old}) now signs {new}. Congrats, {mention}!",
+    "{name} traded {old} for {new}. Same great operator, shiny new call. 73, {mention}!",
+    "Fresh paint on the QSL cards: {mention} is now {new}, formerly {old}.",
+]
+
+
 # --------------------------------------------------------------------- config
 
 @dataclass
@@ -408,6 +418,7 @@ class SrelBot(discord.Client):
                     await member.edit(nick=nick, reason=f"callsign change: {old} -> {new}")
             except discord.HTTPException:
                 log.warning("nickname change denied for %s (owner, or role above bot)", member)
+            await self._announce_callsign(member, row["full_name"] if row else "", old, new)
             try:
                 await member.send(f"Congratulations on the new call! The club's records now show you as `{new}` "
                                   f"(was `{old}`), so your Discord verification and nickname have moved to it. "
@@ -783,6 +794,17 @@ class SrelBot(discord.Client):
             # Never let a failed announcement abort the verification reply —
             # roles are already granted at this point.
             log.warning("welcome post to %s failed: %s", self.cfg.announce_channel_id, e)
+
+    async def _announce_callsign(self, member: discord.Member, name: str, old: str, new: str) -> None:
+        """Tell the club in the members channel (ANNOUNCE_CHANNEL_ID) about a new callsign. Never fatal."""
+        channel = member.guild.get_channel(self.cfg.announce_channel_id) if self.cfg.announce_channel_id else None
+        if not channel:
+            return
+        line = random.choice(CALLSIGN_LINES).format(name=name or member.display_name, old=old, new=new, mention=member.mention)
+        try:
+            await channel.send(line, allowed_mentions=discord.AllowedMentions(users=[member], roles=False, everyone=False))
+        except discord.HTTPException as e:
+            log.warning("callsign announcement failed: %s", e)
 
     async def _post_review(
         self,

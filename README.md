@@ -347,7 +347,7 @@ The roster API returns a JSON list: `[{"callsign": "W8AMY", "name": "Amy Able", 
 
 **Roster sync fails.** `HTTPError 403`: the minutes app doesn't list this container's IP in `W8LBZ_ROSTER_API_ALLOW`, or the tokens differ. `HTTPError 404`: the app has no `W8LBZ_ROSTER_API_TOKEN` (the API is off). `URLError`: wrong `ROSTER_API_URL`, or a firewall. The minutes app logs every call in `api-log.jsonl`.
 
-**A member's callsign changed in the minutes app.** Nothing to do: the roster lists their former calls, so at the next sync (hourly, or `/roster-sync`) their claim moves to the new call, their nickname follows, they get a DM, and the officer log says so. If someone else had already verified with the new call, nothing moves and the officer log asks you to sort it out with `/claim-who` and `/claim-release`.
+**A member's callsign changed in the minutes app.** Nothing to do: the roster lists their former calls, so at the next sync (hourly, or `/roster-sync`) their claim moves to the new call, their nickname follows, they get a DM, the members channel (`ANNOUNCE_CHANNEL_ID`) gets a congratulations post in the welcome lines' style, and the officer log says so. If someone else had already verified with the new call, nothing moves and the officer log asks you to sort it out with `/claim-who` and `/claim-release`.
 
 **"That callsign is already registered."** Use `/claim-who <callsign>` to see who has it and `/claim-release <callsign>` to free it up.
 
