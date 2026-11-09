@@ -1,4 +1,4 @@
 discord.py>=2.3,<3
-gspread>=6.0
+gspread>=6.2.1
 google-auth>=2.0
 python-dotenv>=1.0
