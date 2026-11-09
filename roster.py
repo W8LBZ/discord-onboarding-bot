@@ -1,50 +1,37 @@
-"""Google Sheets → local roster snapshot.
+"""The club roster, from the W8LBZ Minutes app's roster API (it replaced the Google Sheet).
 
-Sheet must have a header row with columns: callsign, full_name, email,
-is_officer. Column order does not matter; extra columns are ignored.
-The is_officer column accepts TRUE/FALSE, yes/no, 1/0, y/n, or a checkbox
-(Google Sheets checkboxes serialize as TRUE/FALSE).
+GET <ROSTER_API_URL> with "Authorization: Bearer <ROSTER_API_TOKEN>" returns active members as JSON:
+[{"callsign": "KD8AAA", "name": "Amy Able", "email": "amy@example.org", "officer": true}, ...]
+The app answers only from addresses it's told to allow (this bot's container), with the token.
 """
 from __future__ import annotations
 
-import gspread
-from google.oauth2.service_account import Credentials
-
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
-
-_TRUTHY = {"true", "yes", "y", "1", "t", "x", "officer"}
+import json
+import urllib.request
 
 
-def _parse_bool(v) -> bool:
-    if isinstance(v, bool):
-        return v
-    if v is None:
-        return False
-    return str(v).strip().lower() in _TRUTHY
-
-
-def fetch_roster(
-    sa_json_path: str, sheet_id: str
-) -> list[tuple[str, str, str, bool]]:
-    """Return normalized list of (callsign, full_name, email, is_officer).
-
-    Rows missing callsign or email are skipped. Duplicate callsigns keep the
-    first occurrence. Callsigns are uppercased; emails lowercased.
-    """
-    creds = Credentials.from_service_account_file(sa_json_path, scopes=SCOPES)
-    gc = gspread.authorize(creds)
-    ws = gc.open_by_key(sheet_id).sheet1
-    records = ws.get_all_records()  # header-name based
-
+def parse_roster(members: list[dict]) -> list[tuple[str, str, str, bool]]:
+    """Normalized (callsign, full_name, email, is_officer). Rows missing a callsign or email are skipped;
+    a duplicate callsign keeps the first. Callsigns are uppercased, emails lowercased."""
     out: list[tuple[str, str, str, bool]] = []
     seen: set[str] = set()
-    for r in records:
-        callsign = str(r.get("callsign", "")).strip().upper()
-        full_name = str(r.get("full_name", "")).strip()
-        email = str(r.get("email", "")).strip().lower()
-        is_officer = _parse_bool(r.get("is_officer"))
+    for m in members:
+        callsign = str(m.get("callsign") or "").strip().upper()
+        email = str(m.get("email") or "").strip().lower()
         if not callsign or not email or callsign in seen:
             continue
         seen.add(callsign)
-        out.append((callsign, full_name, email, is_officer))
+        out.append((callsign, str(m.get("name") or "").strip(), email, m.get("officer") is True))
     return out
+
+
+def fetch_roster(url: str, token: str, timeout: int = 15) -> list[tuple[str, str, str, bool]]:
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("ROSTER_API_URL must be an http:// or https:// address")
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}",
+                                               "User-Agent": "SREL-onboarding-bot"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:  # raises on 403/404/network errors
+        data = json.load(r)
+    if not isinstance(data, list):
+        raise ValueError("roster API returned something other than a list")
+    return parse_roster(data)

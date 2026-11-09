@@ -30,7 +30,7 @@ from store import Store
 
 log = logging.getLogger("srel")
 
-# Worldwide amateur callsign shape check. Accepts KD8AAA, KD8BBB, W8AB, K8E, etc.
+# Worldwide amateur callsign shape check. Accepts KD8AAA, W8AB, K8E, F5AB, etc.
 CALLSIGN_RE = re.compile(r"^[A-Z0-9]{1,3}\d[A-Z]{1,4}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -69,7 +69,7 @@ class Config:
     token: str
     guild_id: int
     welcome_channel_id: int
-    review_channel_id: int
+    review_channel_id: int  # officer log: who verified as an officer, and officer roles changed by a roster sync. 0 = none
     announce_channel_id: int  # 0 disables the welcome announcement
     rules_channel_id: int  # 0 omits the rules link from prompts
     unverified_role_id: int
@@ -82,8 +82,8 @@ class Config:
     smtp_password: str
     from_email: str
     from_name: str
-    sheet_id: str
-    sa_json: str
+    roster_api_url: str
+    roster_api_token: str
     roster_sync_min: int
     db_path: str
     code_ttl_min: int
@@ -94,9 +94,9 @@ class Config:
         load_dotenv()
         g = os.environ.get
         required = [
-            "DISCORD_TOKEN", "GUILD_ID", "WELCOME_CHANNEL_ID", "REVIEW_CHANNEL_ID",
+            "DISCORD_TOKEN", "GUILD_ID", "WELCOME_CHANNEL_ID",
             "UNVERIFIED_ROLE_ID", "MEMBER_ROLE_ID", "GUEST_ROLE_ID", "OFFICER_ROLE_ID",
-            "SMTP_USER", "SMTP_PASSWORD", "FROM_EMAIL", "GOOGLE_SHEET_ID",
+            "SMTP_USER", "SMTP_PASSWORD", "FROM_EMAIL", "ROSTER_API_URL", "ROSTER_API_TOKEN",
         ]
         missing = [k for k in required if not g(k)]
         if missing:
@@ -112,7 +112,7 @@ class Config:
             token=g("DISCORD_TOKEN"),
             guild_id=int(g("GUILD_ID")),
             welcome_channel_id=int(g("WELCOME_CHANNEL_ID")),
-            review_channel_id=int(g("REVIEW_CHANNEL_ID")),
+            review_channel_id=int(g("REVIEW_CHANNEL_ID", "0")),
             announce_channel_id=int(g("ANNOUNCE_CHANNEL_ID", "0")),
             rules_channel_id=int(g("RULES_CHANNEL_ID", "0")),
             unverified_role_id=int(g("UNVERIFIED_ROLE_ID")),
@@ -125,8 +125,8 @@ class Config:
             smtp_password=g("SMTP_PASSWORD"),
             from_email=g("FROM_EMAIL"),
             from_name=g("FROM_NAME", "SREL Bot"),
-            sheet_id=g("GOOGLE_SHEET_ID"),
-            sa_json=g("GOOGLE_SA_JSON", "./service-account.json"),
+            roster_api_url=g("ROSTER_API_URL"),
+            roster_api_token=g("ROSTER_API_TOKEN"),
             roster_sync_min=int(g("ROSTER_SYNC_INTERVAL_MIN", "60")),
             db_path=g("DB_PATH", "./bot.db"),
             code_ttl_min=int(g("CODE_TTL_MIN", "15")),
@@ -165,6 +165,18 @@ def agreed(value: str) -> bool:
 def rules_hint(cfg: "Config") -> str:
     where = f"<#{cfg.rules_channel_id}>" if cfg.rules_channel_id else "the rules channel"
     return f"You must read {where} and type **I AGREE** to continue."
+
+
+def welcome_text(cfg: "Config") -> str:
+    rules = f"<#{cfg.rules_channel_id}>" if cfg.rules_channel_id else "the rules channel"
+    return (
+        "**Welcome to SREL.**\n"
+        f"Read {rules} first, then click below to get started. Either button asks "
+        "you to type **I AGREE** to confirm you've read them.\n\n"
+        "• **Club member?** We'll verify by emailing a short code to the address on file. "
+        "Check your spam folder if it doesn't arrive.\n"
+        "• **Just visiting?** No callsign needed — say hello."
+    )
 
 
 class WelcomeView(discord.ui.View):
@@ -340,6 +352,7 @@ class SrelBot(discord.Client):
         self.store = Store(cfg.db_path)
         self.tree = app_commands.CommandTree(self)
         self._last_welcome_line: str | None = None  # in memory only; resets on restart
+        self._welcome_task: asyncio.Task | None = None
 
     async def setup_hook(self):
         self.add_view(WelcomeView(self))
@@ -356,15 +369,61 @@ class SrelBot(discord.Client):
     # --- roster ---
 
     async def _roster_sync_loop(self):
+        await self.wait_until_ready()  # the member cache, for the officer roles
         while not self.is_closed():
             try:
-                await asyncio.to_thread(self._do_roster_sync)
+                await self.sync_roster()
             except Exception as e:
                 log.exception("roster sync failed: %s", e)
             await asyncio.sleep(self.cfg.roster_sync_min * 60)
 
-    def _do_roster_sync(self) -> int:
-        rows = fetch_roster(self.cfg.sa_json, self.cfg.sheet_id)
+    async def sync_roster(self) -> tuple[int, list[str]]:
+        """Fetch the roster; if it was accepted, make officer roles match it. Returns (rows, role changes)."""
+        count, accepted = await asyncio.to_thread(self._do_roster_sync)
+        return count, await self.reconcile_officers() if accepted else []
+
+    async def reconcile_officers(self) -> list[str]:
+        """Verified members get @officer while the roster marks them an officer, and lose it when it no longer
+        does (a change of officers recorded in the minutes app). Members without a claim are left alone."""
+        guild = self.get_guild(self.cfg.guild_id)
+        role = guild.get_role(self.cfg.officer_role_id) if guild else None
+        if not role:
+            return []
+        changes = []
+        for claim in self.store.all_claims():
+            member = guild.get_member(claim["discord_user_id"])
+            if not member:
+                continue
+            row = self.store.roster_lookup(claim["callsign"])
+            want, has = bool(row and row["is_officer"]), role in member.roles
+            if want == has:
+                continue
+            try:
+                if want:
+                    await member.add_roles(role, reason=f"roster: {claim['callsign']} is an officer")
+                else:
+                    await member.remove_roles(role, reason=f"roster: {claim['callsign']} is no longer an officer")
+            except discord.HTTPException as e:
+                log.warning("officer role change for %s failed: %s", member, e)
+                continue
+            changes.append(f"{member.mention} (`{claim['callsign']}`) {'given' if want else 'removed from'} {role.mention}")
+        if changes:
+            await self._officer_log("Officer roles updated from the club roster:\n" + "\n".join(changes))
+        return changes
+
+    async def _officer_log(self, text: str) -> None:
+        """A note in the officer log channel (REVIEW_CHANNEL_ID), if there is one. Never fatal."""
+        channel = self.get_channel(self.cfg.review_channel_id) if self.cfg.review_channel_id else None
+        if not channel:
+            return
+        try:
+            await channel.send(text[:1900], allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException as e:
+            log.warning("officer log post failed: %s", e)
+
+    def _do_roster_sync(self) -> tuple[int, bool]:
+        """(rows in the snapshot, whether the fetched roster was accepted)."""
+        rows = fetch_roster(self.cfg.roster_api_url, self.cfg.roster_api_token)
         current = self.store.roster_count()
         # ponytail: naive 25% deletion guard. Upgrade to a diff-and-alert if
         # officers start editing the sheet frequently.
@@ -373,10 +432,10 @@ class SrelBot(discord.Client):
                 "roster sync rejected: %d -> %d rows (>25%% drop, keeping snapshot)",
                 current, len(rows),
             )
-            return current
+            return current, False
         self.store.replace_roster(rows)
         log.info("roster synced: %d rows", len(rows))
-        return len(rows)
+        return len(rows), True
 
     # --- events ---
 
@@ -386,11 +445,48 @@ class SrelBot(discord.Client):
         role = member.guild.get_role(self.cfg.unverified_role_id)
         if not role:
             log.warning("unverified role %s not found", self.cfg.unverified_role_id)
+        else:
+            try:
+                await member.add_roles(role, reason="onboarding: auto-unverified on join")
+            except discord.Forbidden:
+                log.warning("cannot assign unverified role to %s", member)
+        # A DM pointing at the welcome buttons, so the first step isn't lost in a busy channel.
+        channel = member.guild.get_channel(self.cfg.welcome_channel_id)
+        if channel:
+            try:
+                await member.send(
+                    f"Welcome to the SREL Discord! To get in, go to {channel.jump_url} and click "
+                    "**I'm a club member** (we email a code to the address the club has for you) "
+                    "or **I'm just visiting**."
+                )
+            except discord.HTTPException:
+                pass  # DMs closed: the welcome channel still has the buttons
+
+    # --- the welcome message stays at the bottom of the welcome channel ---
+
+    async def on_message(self, message: discord.Message):
+        if message.channel.id != self.cfg.welcome_channel_id or message.author == self.user:
             return
-        try:
-            await member.add_roles(role, reason="onboarding: auto-unverified on join")
-        except discord.Forbidden:
-            log.warning("cannot assign unverified role to %s", member)
+        # Wait for things to settle (a burst of joins or chat), then move the welcome back down once.
+        if self._welcome_task and not self._welcome_task.done():
+            self._welcome_task.cancel()
+        self._welcome_task = asyncio.create_task(self._repost_later(message.channel))
+
+    async def _repost_later(self, channel, delay: float = 30):
+        await asyncio.sleep(delay)
+        if channel.last_message_id != self.store.get_setting("welcome_message_id"):
+            await self.repost_welcome(channel)
+
+    async def repost_welcome(self, channel) -> None:
+        """Post the welcome message with its buttons and delete the previous one."""
+        old = self.store.get_setting("welcome_message_id")
+        msg = await channel.send(welcome_text(self.cfg), view=WelcomeView(self))
+        self.store.set_setting("welcome_message_id", msg.id)
+        if old:
+            try:
+                await channel.get_partial_message(old).delete()
+            except discord.HTTPException:
+                pass  # already gone
 
     # --- flow ---
 
@@ -441,7 +537,8 @@ class SrelBot(discord.Client):
         if claim and claim["discord_user_id"] == interaction.user.id:
             # Already announced when the claim was first created. Re-running
             # this is free (no email, no code), so don't let it spam the channel.
-            await self._grant_member(interaction, callsign, announce=False)
+            row = self.store.roster_lookup(callsign)
+            await self._grant_member(interaction, callsign, also_officer=bool(row and row["is_officer"]), announce=False)
             return
         if claim:
             await interaction.response.send_message(
@@ -540,27 +637,17 @@ class SrelBot(discord.Client):
             )
             return
 
-        # Officer path: identity is proven by the email code, but the officer
-        # role itself requires human approval (v2 doc §9). We do NOT grant
-        # @member yet either — per doc, officer grants queue unconditionally.
+        # Officers: the email code proves they control the address the club's roster has for that callsign,
+        # and the roster (kept by the officers in the minutes app) says they're an officer, so the role is
+        # granted at once. The officer log gets a note instead of an approval request.
         row = self.store.roster_lookup(callsign)
-        if row and row["is_officer"]:
-            if not existing:
-                self.store.add_claim(callsign, interaction.user.id, email)
-            qid = self.store.open_review(
-                interaction.user.id, callsign, email, "officer_grant"
-            )
-            await self._post_review(interaction, qid, callsign, email, "officer_grant")
-            await interaction.response.send_message(
-                f"Email verified for `{callsign}`. Officer role requires human approval — "
-                "an officer or the server owner will review shortly. You'll get a DM.",
-                ephemeral=True,
-            )
-            return
-
+        officer = bool(row and row["is_officer"])
         if not existing:
             self.store.add_claim(callsign, interaction.user.id, email)
-        await self._grant_member(interaction, callsign, announce=not existing)
+        await self._grant_member(interaction, callsign, also_officer=officer, announce=not existing)
+        if officer:
+            await self._officer_log(f"{interaction.user.mention} verified as `{callsign}` and was given the officer role "
+                                    "(the club roster marks them an officer).")
 
     async def _grant_member(
         self,
@@ -828,35 +915,28 @@ def register_commands(bot: SrelBot) -> None:
                 "Welcome channel not found.", ephemeral=True
             )
             return
-        rules = (
-            f"<#{bot.cfg.rules_channel_id}>" if bot.cfg.rules_channel_id else "the rules channel"
+        await bot.repost_welcome(channel)
+        await interaction.response.send_message(
+            "Posted. It moves itself back to the bottom whenever other messages bury it.", ephemeral=True
         )
-        await channel.send(
-            "**Welcome to SREL.**\n"
-            f"Read {rules} first, then click below to get started. Either button asks "
-            "you to type **I AGREE** to confirm you've read them.\n\n"
-            "• **Club member?** We'll verify by emailing a short code to the address on file. "
-            "Check your spam folder if it doesn't arrive.\n"
-            "• **Just visiting?** No callsign needed — say hello.",
-            view=WelcomeView(bot),
-        )
-        await interaction.response.send_message("Posted.", ephemeral=True)
 
     @bot.tree.command(
         name="roster-sync",
-        description="Force a roster resync from the Google Sheet.",
+        description="Fetch the roster from the minutes app now, and update officer roles.",
     )
     @app_commands.default_permissions(administrator=True)
     async def roster_sync(interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            count = await asyncio.to_thread(bot._do_roster_sync)
+            count, changes = await bot.sync_roster()
             await interaction.followup.send(
-                f"Synced. Roster now has {count} rows.", ephemeral=True
+                f"Synced. Roster now has {count} rows."
+                + (f" Officer roles changed for {len(changes)}." if changes else ""),
+                ephemeral=True,
             )
         except Exception as e:
             log.exception("manual roster sync failed")
-            await interaction.followup.send(f"Sync failed: {e}", ephemeral=True)
+            await interaction.followup.send(f"Sync failed: {type(e).__name__}. See the bot's log.", ephemeral=True)
 
     @bot.tree.command(
         name="claim-release",

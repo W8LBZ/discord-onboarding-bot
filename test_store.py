@@ -108,6 +108,35 @@ def test_welcome_lines_render():
             assert word not in f" {out.lower()} ", f"gendered pronoun in: {t}"
 
 
+def test_code_attempts():
+    s = fresh()
+    s.create_code(1, "KD8AAA", "a@ex.com", "123456", ttl_min=15)
+    for _ in range(4):
+        assert s.consume_code(1, "000000") is None
+    assert s.consume_code(1, "123456") == ("KD8AAA", "a@ex.com"), "right code refused after 4 wrong tries"
+    s.create_code(1, "KD8AAA", "a@ex.com", "654321", ttl_min=15)
+    for _ in range(5):
+        s.consume_code(1, "000000")
+    assert s.consume_code(1, "654321") is None, "code still usable after 5 wrong tries"
+
+
+def test_settings():
+    s = fresh()
+    assert s.get_setting("welcome_message_id") is None
+    s.set_setting("welcome_message_id", 1234567890123)
+    s.set_setting("welcome_message_id", 987)
+    assert s.get_setting("welcome_message_id") == 987
+
+
+def test_parse_roster():
+    from roster import parse_roster
+    rows = parse_roster([{"callsign": "kd8aaa", "name": "Amy Able", "email": "Amy@Example.org", "officer": True},
+                         {"callsign": None, "name": "No Call", "email": "x@example.org", "officer": False},
+                         {"callsign": "KD8AAA", "name": "Dup", "email": "d@example.org", "officer": False},
+                         {"callsign": "KD8BBB", "name": "Bob", "email": "", "officer": "true"}])
+    assert rows == [("KD8AAA", "Amy Able", "amy@example.org", True)], rows
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

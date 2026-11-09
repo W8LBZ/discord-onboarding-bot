@@ -3,10 +3,12 @@
 Tables:
     roster   - snapshot of the club roster (from Google Sheets)
     claimed  - dedup ledger: which Discord user claimed which callsign
-    codes    - one-time email verification codes
+    codes    - one-time email verification codes (MAX_ATTEMPTS wrong tries each)
+    settings - small values that outlive a restart (the welcome message's id)
 """
 from __future__ import annotations
 
+import secrets
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -54,8 +56,16 @@ CREATE TABLE IF NOT EXISTS review_queue (
     resolution      TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_review_open ON review_queue(resolved_at);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_review_user ON review_queue(discord_user_id, resolved_at);
 """
+
+
+MAX_ATTEMPTS = 5  # wrong guesses before a code is void: 5 in a million, not a million in 15 minutes
 
 
 def _now() -> str:
@@ -67,6 +77,20 @@ class Store:
         self.path = path
         with self._conn() as c:
             c.executescript(SCHEMA)
+            if "attempts" not in {r[1] for r in c.execute("PRAGMA table_info(codes)")}:  # older bot.db
+                c.execute("ALTER TABLE codes ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
+
+    # --- settings ---
+
+    def get_setting(self, key: str):
+        with self._conn() as c:
+            row = c.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+            return int(row["value"]) if row and row["value"].isdigit() else (row["value"] if row else None)
+
+    def set_setting(self, key: str, value) -> None:
+        with self._conn() as c:
+            c.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
+                      "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, str(value)))
 
     @contextmanager
     def _conn(self):
@@ -231,15 +255,20 @@ class Store:
             )
 
     def consume_code(self, user_id: int, code: str):
-        """Atomically mark a code used. Returns (callsign, email) or None."""
+        """Atomically mark a code used. Returns (callsign, email) or None. A wrong guess counts against the
+        user's active code; after MAX_ATTEMPTS it's void and they ask for a new one."""
         with self._conn() as c:
             row = c.execute(
-                """SELECT id, callsign, email, expires_at FROM codes
-                   WHERE discord_user_id = ? AND code = ? AND used_at IS NULL
+                """SELECT id, callsign, email, code, expires_at, attempts FROM codes
+                   WHERE discord_user_id = ? AND used_at IS NULL
                    ORDER BY id DESC LIMIT 1""",
-                (user_id, code),
+                (user_id,),
             ).fetchone()
             if not row or row["expires_at"] < _now():
+                return None
+            if not secrets.compare_digest(row["code"], code):
+                c.execute("UPDATE codes SET attempts = attempts + 1, used_at = CASE WHEN attempts + 1 >= ? THEN ? END "
+                          "WHERE id = ?", (MAX_ATTEMPTS, _now(), row["id"]))
                 return None
             c.execute(
                 "UPDATE codes SET used_at = ? WHERE id = ?", (_now(), row["id"])

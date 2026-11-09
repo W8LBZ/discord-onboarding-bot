@@ -343,6 +343,8 @@ These stop the *structural* attacks, which are the interesting ones, and they ju
 
 ## 9. Role Assignment Logic
 
+> **Changed 2026-11-08:** officers no longer wait for human approval. A verified callsign the roster marks as an officer gets `@officer` at once (noted in the officer log), and each roster sync adds or removes `@officer` to match the roster. See README → Officers.
+
 **States:** `@unverified` (on join) → `@pending-verification` | `@guest` | `@club-member` (+ `@club-officer`)
 
 | Condition | Result |
@@ -399,6 +401,8 @@ Because of this, the vendor choice is genuinely low-stakes. Decide it in five mi
 ### 10.3 Recommendation
 
 **Start with Google Sheets.** Take the self-host path only if a specific person actively wants to run it.
+
+> **Changed 2026-11-08:** the roster now lives in the W8LBZ Minutes app, which serves it at `/api/roster` (README → The roster). The sheet is retired.
 
 The self-hosting instinct is right about ownership and wrong about cost. A Baserow instance for ~100 rows means a VPS, TLS certs, backups, and version upgrades — and that burden lands permanently on whoever set it up. Volunteer infrastructure decays when its maintainer moves, changes jobs, or becomes a Silent Key. The failure mode isn't "vendor raises prices," it's "nobody has the server password anymore."
 
