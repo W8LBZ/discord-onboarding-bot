@@ -379,8 +379,43 @@ class SrelBot(discord.Client):
 
     async def sync_roster(self) -> tuple[int, list[str]]:
         """Fetch the roster; if it was accepted, make officer roles match it. Returns (rows, role changes)."""
-        count, accepted = await asyncio.to_thread(self._do_roster_sync)
-        return count, await self.reconcile_officers() if accepted else []
+        count, accepted, moves = await asyncio.to_thread(self._do_roster_sync)
+        if not accepted:
+            return count, []
+        await self._follow_callsign_changes(moves)
+        return count, await self.reconcile_officers()
+
+    async def _follow_callsign_changes(self, moves: list[tuple[str, str, str]]) -> None:
+        """After the minutes app records a new callsign: claims already moved (in _do_roster_sync), so here the
+        nickname follows and the member and the officer log are told. A conflict is left for the officers."""
+        guild = self.get_guild(self.cfg.guild_id)
+        notes = []
+        for old, new, result in moves:
+            if result == "conflict":
+                holder = self.store.claim_by_callsign(new)
+                notes.append(f"`{old}` is now `{new}`, but <@{holder['discord_user_id']}> already verified as `{new}`. "
+                             f"Check who's who, then `/claim-release` the wrong one.")
+                continue
+            claim = self.store.claim_by_callsign(new)
+            member = guild.get_member(claim["discord_user_id"]) if guild and claim else None
+            notes.append(f"{member.mention if member else '(left the server)'}: `{old}` is now `{new}`; their verification moved with it.")
+            if not member or result != "moved":
+                continue
+            row = self.store.roster_lookup(new)
+            nick = club_nick(row["full_name"] if row else "", new)
+            try:
+                if member.nick != nick:
+                    await member.edit(nick=nick, reason=f"callsign change: {old} -> {new}")
+            except discord.HTTPException:
+                log.warning("nickname change denied for %s (owner, or role above bot)", member)
+            try:
+                await member.send(f"Congratulations on the new call! The club's records now show you as `{new}` "
+                                  f"(was `{old}`), so your Discord verification and nickname have moved to it. "
+                                  "Nothing to do on your part.")
+            except discord.HTTPException:
+                pass  # DMs closed
+        if notes:
+            await self._officer_log("Callsign changes from the club roster:\n" + "\n".join(notes))
 
     async def reconcile_officers(self) -> list[str]:
         """Verified members get @officer while the roster marks them an officer, and lose it when it no longer
@@ -421,9 +456,9 @@ class SrelBot(discord.Client):
         except discord.HTTPException as e:
             log.warning("officer log post failed: %s", e)
 
-    def _do_roster_sync(self) -> tuple[int, bool]:
-        """(rows in the snapshot, whether the fetched roster was accepted)."""
-        rows = fetch_roster(self.cfg.roster_api_url, self.cfg.roster_api_token)
+    def _do_roster_sync(self) -> tuple[int, bool, list[tuple[str, str, str]]]:
+        """(rows in the snapshot, whether the fetched roster was accepted, [(old call, new call, what happened)])."""
+        rows, changes = fetch_roster(self.cfg.roster_api_url, self.cfg.roster_api_token)
         current = self.store.roster_count()
         # ponytail: naive 25% deletion guard. Upgrade to a diff-and-alert if
         # officers start editing the sheet frequently.
@@ -432,10 +467,13 @@ class SrelBot(discord.Client):
                 "roster sync rejected: %d -> %d rows (>25%% drop, keeping snapshot)",
                 current, len(rows),
             )
-            return current, False
+            return current, False, []
         self.store.replace_roster(rows)
         log.info("roster synced: %d rows", len(rows))
-        return len(rows), True
+        moves = [(old, new, r) for old, new in changes.items() if (r := self.store.transfer_claim(old, new)) != "none"]
+        for old, new, r in moves:
+            log.info("callsign change %s -> %s: claim %s", old, new, r)
+        return len(rows), True, moves
 
     # --- events ---
 

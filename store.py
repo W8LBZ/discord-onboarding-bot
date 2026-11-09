@@ -160,6 +160,22 @@ class Store:
                 (callsign, user_id, email.lower(), _now()),
             )
 
+    def transfer_claim(self, old: str, new: str) -> str:
+        """Move a claim to a member's new callsign. Returns "moved", "same user" (they'd already verified with
+        the new call: the old claim is dropped), "conflict" (someone else holds the new call) or "none"."""
+        with self._conn() as c:
+            a = c.execute("SELECT discord_user_id FROM claimed WHERE callsign = ?", (old,)).fetchone()
+            if not a:
+                return "none"
+            b = c.execute("SELECT discord_user_id FROM claimed WHERE callsign = ?", (new,)).fetchone()
+            if b and b[0] != a[0]:
+                return "conflict"
+            if b:
+                c.execute("DELETE FROM claimed WHERE callsign = ?", (old,))
+                return "same user"
+            c.execute("UPDATE claimed SET callsign = ? WHERE callsign = ?", (new, old))
+            return "moved"
+
     def release_claim(self, callsign: str) -> None:
         with self._conn() as c:
             c.execute("DELETE FROM claimed WHERE callsign = ?", (callsign,))

@@ -15,7 +15,6 @@ The roster comes from the W8LBZ Minutes app's roster API (the Google Sheet is re
 |---|---|
 | Versioned rules acceptance + re-prompt on bump (a plain "type I AGREE" gate is built) | §8 |
 | Public verification log | §6.6 |
-| `/claim transfer <old> <new>` — vanity call changes | §6.9, §12 |
 | `/verify user <@user>` — manual override path | §6.9 |
 | `/rules bump <version>` | §6.9, §8 |
 | Audit log for privileged commands | §6.9, §13 |
@@ -327,7 +326,7 @@ Then rsync or scp `/opt/srel-bot/backup/` to somewhere off the container. Proxmo
 
 ## Roster format
 
-The roster API returns a JSON list: `[{"callsign": "KD8AAA", "name": "Amy Able", "email": "amy@example.org", "officer": true}, ...]`. Rules the sync enforces:
+The roster API returns a JSON list: `[{"callsign": "W8AMY", "name": "Amy Able", "email": "amy@example.org", "officer": true, "former": ["KD8AAA"]}, ...]`. `former` lists earlier callsigns, so claims follow a callsign change. Rules the sync enforces:
 
 - Rows missing a callsign or email are skipped.
 - Duplicate callsigns keep the first row.
@@ -348,7 +347,7 @@ The roster API returns a JSON list: `[{"callsign": "KD8AAA", "name": "Amy Able",
 
 **Roster sync fails.** `HTTPError 403`: the minutes app doesn't list this container's IP in `W8LBZ_ROSTER_API_ALLOW`, or the tokens differ. `HTTPError 404`: the app has no `W8LBZ_ROSTER_API_TOKEN` (the API is off). `URLError`: wrong `ROSTER_API_URL`, or a firewall. The minutes app logs every call in `api-log.jsonl`.
 
-**A member's callsign changed in the minutes app.** Their claim is under the old call, so the next sync takes `@officer` from an officer. Run `/claim-release <old call>` and have them verify again with the new one.
+**A member's callsign changed in the minutes app.** Nothing to do: the roster lists their former calls, so at the next sync (hourly, or `/roster-sync`) their claim moves to the new call, their nickname follows, they get a DM, and the officer log says so. If someone else had already verified with the new call, nothing moves and the officer log asks you to sort it out with `/claim-who` and `/claim-release`.
 
 **"That callsign is already registered."** Use `/claim-who <callsign>` to see who has it and `/claim-release <callsign>` to free it up.
 

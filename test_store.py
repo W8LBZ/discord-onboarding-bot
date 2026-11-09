@@ -137,6 +137,25 @@ def test_parse_roster():
     assert rows == [("KD8AAA", "Amy Able", "amy@example.org", True)], rows
 
 
+def test_transfer_claim():
+    s = fresh()
+    s.add_claim("KD8AAA", 1, "a@ex.com")
+    assert s.transfer_claim("KD8AAA", "W8AMY") == "moved"
+    assert s.claim_by_callsign("W8AMY")["discord_user_id"] == 1 and s.claim_by_callsign("KD8AAA") is None
+    assert s.transfer_claim("KD8AAA", "W8AMY") == "none"  # the next sync: nothing left to move
+    s.add_claim("KD8BBB", 2, "b@ex.com")
+    s.add_claim("W8BOB", 3, "c@ex.com")
+    assert s.transfer_claim("KD8BBB", "W8BOB") == "conflict" and s.claim_by_callsign("KD8BBB")["discord_user_id"] == 2
+    s.add_claim("KD8CCC", 4, "d@ex.com")
+    s.add_claim("W8CAL", 4, "d2@ex.com")  # re-verified with the new call already
+    assert s.transfer_claim("KD8CCC", "W8CAL") == "same user" and s.claim_by_callsign("KD8CCC") is None
+
+
+def test_callsign_changes():
+    from roster import callsign_changes
+    assert callsign_changes([{"callsign": "w8amy", "former": ["kd8aaa", "W8AMY"]}, {"callsign": "KD8BBB"}]) == {"KD8AAA": "W8AMY"}
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

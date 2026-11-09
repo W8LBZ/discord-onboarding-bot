@@ -1,7 +1,8 @@
 """The club roster, from the W8LBZ Minutes app's roster API (it replaced the Google Sheet).
 
 GET <ROSTER_API_URL> with "Authorization: Bearer <ROSTER_API_TOKEN>" returns active members as JSON:
-[{"callsign": "KD8AAA", "name": "Amy Able", "email": "amy@example.org", "officer": true}, ...]
+[{"callsign": "W8AMY", "name": "Amy Able", "email": "amy@example.org", "officer": true, "former": ["KD8AAA"]}, ...]
+"former" lists a member's earlier callsigns, so a claim made under an old call can follow them (callsign_changes).
 The app answers only from addresses it's told to allow (this bot's container), with the token.
 """
 from __future__ import annotations
@@ -25,7 +26,20 @@ def parse_roster(members: list[dict]) -> list[tuple[str, str, str, bool]]:
     return out
 
 
-def fetch_roster(url: str, token: str, timeout: int = 15) -> list[tuple[str, str, str, bool]]:
+def callsign_changes(members: list[dict]) -> dict[str, str]:
+    """{old call: current call} from each member's "former" list."""
+    out = {}
+    for m in members:
+        new = str(m.get("callsign") or "").strip().upper()
+        for old in m.get("former") or []:
+            old = str(old).strip().upper()
+            if new and old and old != new:
+                out[old] = new
+    return out
+
+
+def fetch_roster(url: str, token: str, timeout: int = 15) -> tuple[list[tuple[str, str, str, bool]], dict[str, str]]:
+    """(roster rows, {old call: current call})."""
     if not url.startswith(("http://", "https://")):
         raise ValueError("ROSTER_API_URL must be an http:// or https:// address")
     req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}",
@@ -34,4 +48,4 @@ def fetch_roster(url: str, token: str, timeout: int = 15) -> list[tuple[str, str
         data = json.load(r)
     if not isinstance(data, list):
         raise ValueError("roster API returned something other than a list")
-    return parse_roster(data)
+    return parse_roster(data), callsign_changes(data)
